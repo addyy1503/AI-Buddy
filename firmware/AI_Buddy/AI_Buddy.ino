@@ -22,6 +22,8 @@
  */
 
 #include <WiFi.h>
+#include <WiFiUdp.h>
+#include <esp_wifi.h>
 #include "config.h"
 #include "audio_manager.h"
 #include "display_manager.h"
@@ -78,6 +80,38 @@ bool connectWiFiDirect() {
     }
 }
 
+String discoverServer() {
+    WiFiUDP udp;
+    udp.begin(8766);
+    Serial.println("[WIFI] Listening for server UDP broadcast on port 8766...");
+    display.showStatus("Finding Server", "Listening...");
+    
+    char packetBuffer[255];
+    unsigned long startWait = millis();
+    
+    while (true) {
+        int packetSize = udp.parsePacket();
+        if (packetSize) {
+            int len = udp.read(packetBuffer, 255);
+            if (len > 0) packetBuffer[len] = 0;
+            String msg = String(packetBuffer);
+            if (msg.startsWith("AI_BUDDY_SERVER")) {
+                String ip = udp.remoteIP().toString();
+                Serial.printf("[WIFI] Found Server at %s\n", ip.c_str());
+                udp.stop();
+                return ip;
+            }
+        }
+        
+        // Show animation
+        if (millis() - startWait > 50) {
+            display.update();
+            startWait = millis();
+        }
+        delay(1);
+    }
+}
+
 // ══════════════════════════════════════
 //  Setup
 // ══════════════════════════════════════
@@ -91,6 +125,9 @@ void setup() {
 
     // ── Step 1: WiFi FIRST (nothing else initialized) ──
     wifiConnected = connectWiFiDirect();
+    if (wifiConnected) {
+        esp_wifi_set_ps(WIFI_PS_NONE); // Disable Power Save to prevent hotspot drops
+    }
 
     // ── Step 2: Display ──
     if (!display.begin()) {
@@ -114,7 +151,8 @@ void setup() {
 
     // ── Step 4: HTTP Comm (only if WiFi connected) ──
     if (wifiConnected) {
-        comm = new HttpComm();
+        String serverIp = discoverServer();
+        comm = new HttpComm(serverIp);
 
         // Quick server check
         display.showStatus("Checking server...", "");
@@ -151,8 +189,10 @@ void loop() {
             display.update();
             wifiConnected = connectWiFiDirect();
             lastWifiRetry = millis();
-            if (wifiConnected && !comm) {
-                comm = new HttpComm();
+            if (wifiConnected) {
+                if (comm) { delete comm; }
+                String serverIp = discoverServer();
+                comm = new HttpComm(serverIp);
             }
             display.clearMessage();
         }
@@ -197,6 +237,12 @@ void loop() {
                 delay(2000);
                 display.clearMessage();
                 currentState = STATE_IDLE;
+                
+                // IP might have changed or hotspot dropped the route
+                Serial.println("[MAIN] Rediscovering server...");
+                if (comm) { delete comm; }
+                String serverIp = discoverServer();
+                comm = new HttpComm(serverIp);
                 break;
             }
 

@@ -23,6 +23,8 @@ import base64
 import asyncio
 import io
 import pygame
+import socket
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 # Initialize pygame mixer for local audio playback
@@ -35,7 +37,7 @@ if sys.platform == "win32":
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 import uvicorn
 
 from stt_engine import STTEngine
@@ -58,8 +60,41 @@ ai = AIPipeline(
     personality_name=os.getenv("PERSONALITY", "snarky"),
 )
 
+# ── UDP Auto-Discovery ──
+def get_all_local_ips():
+    try:
+        hostname = socket.gethostname()
+        _, _, ip_list = socket.gethostbyname_ex(hostname)
+        return ip_list
+    except Exception:
+        return ["0.0.0.0"]
+
+async def udp_broadcaster():
+    print("[SERVER] UDP Auto-discovery broadcaster started on port 8766")
+    while True:
+        ips = get_all_local_ips()
+        for ip in ips:
+            try:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+                # Bind to the specific adapter's IP to force Windows to route it correctly
+                sock.bind((ip, 0))
+                sock.sendto(b"AI_BUDDY_SERVER:8765", ("255.255.255.255", 8766))
+                sock.close()
+            except Exception:
+                pass
+        await asyncio.sleep(2)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: Start the UDP broadcaster task
+    task = asyncio.create_task(udp_broadcaster())
+    yield
+    # Shutdown: Cancel the task
+    task.cancel()
+
 # ── FastAPI App ──
-app = FastAPI()
+app = FastAPI(lifespan=lifespan)
 
 
 @app.get("/ping")
@@ -79,7 +114,7 @@ async def talk(request: Request):
     print(f"\n[SERVER] >> Received {len(pcm_data)} bytes of audio via HTTP")
 
     if len(pcm_data) == 0:
-        return JSONResponse({"emotion": 0, "text": "", "audio_b64": ""})
+        return Response(content=b"", headers={"X-Emotion": "0", "X-Text": "", "X-Duration-Ms": "0"})
 
     try:
         # Step 1: Speech-to-Text
@@ -88,7 +123,7 @@ async def talk(request: Request):
 
         if not text or not text.strip():
             print("[SERVER] No speech detected")
-            return JSONResponse({"emotion": 0, "text": "I didn't catch that", "audio_b64": ""})
+            return Response(content=b"", headers={"X-Emotion": "0", "X-Text": "I didn't catch that", "X-Duration-Ms": "0"})
 
         print(f'[SERVER] Heard: "{text}"')
 
@@ -110,30 +145,42 @@ async def talk(request: Request):
         except Exception as e:
             print(f"[SERVER] Failed to play audio locally: {e}")
 
-        # Send empty audio data to the ESP32 so it doesn't try to play it
-        # It will just show the matching facial expression
-        audio_b64 = ""
-
         print(f"[SERVER] [OK] Done! emotion={emotion}, audio={len(response_audio)} bytes")
 
         audio_duration_ms = int((len(response_audio) / 32000.0) * 1000)
+        
+        # Clean up text to avoid header injection issues
+        clean_text = response_text[:100].replace("\n", " ").replace("\r", " ")
+        
+        headers = {
+            "X-Emotion": str(emotion),
+            "X-Text": clean_text,
+            "X-Duration-Ms": str(audio_duration_ms)
+        }
+        
+        # If user says "turn off" or "shut down", exit the python server gracefully
+        text_lower = text.lower()
+        if "turn off" in text_lower or "shut down" in text_lower:
+            import threading
+            import time
+            import os
+            def shutdown_server():
+                print("\n[SERVER] Shutting down in 3 seconds as requested by voice command...")
+                time.sleep(3)
+                os._exit(0)
+            threading.Thread(target=shutdown_server).start()
 
-        return JSONResponse({
-            "emotion": emotion,
-            "text": response_text[:100],
-            "audio_b64": audio_b64,
-            "duration_ms": audio_duration_ms
-        })
+        return Response(
+            content=response_audio,
+            media_type="application/octet-stream",
+            headers=headers
+        )
 
     except Exception as e:
         print(f"[SERVER] [ERR] Pipeline error: {e}")
         import traceback
         traceback.print_exc()
-        return JSONResponse({
-            "emotion": 2,
-            "text": "Something went wrong",
-            "audio_b64": ""
-        })
+        return Response(content=b"", headers={"X-Emotion": "2", "X-Text": "Something went wrong", "X-Duration-Ms": "0"})
 
 
 @app.websocket("/ws")

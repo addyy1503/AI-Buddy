@@ -10,8 +10,8 @@
 // ═══════════════════════════════════════
 //  WiFi Settings
 // ═══════════════════════════════════════
-#define WIFI_SSID     "Airtel_Shruthi"
-#define WIFI_PASSWORD "9448534157"
+#define WIFI_SSID     "Addyyy"
+#define WIFI_PASSWORD "123456789"
 
 // ═══════════════════════════════════════
 //  Backend Server
@@ -67,8 +67,8 @@
 #define MAX_RECORD_SECS   4
 #define MAX_RECORD_BYTES  (SAMPLE_RATE * 2 * MAX_RECORD_SECS)  // ~128KB, easily fits in Internal RAM
 
-// Playback buffer is virtually unused since laptop plays audio
-#define MAX_PLAY_BYTES    1024 
+// Playback buffer needs to hold the entire generated response audio
+#define MAX_PLAY_BYTES    150000 
 
 // ═══════════════════════════════════════
 //  Silence Detection (auto-stop recording)

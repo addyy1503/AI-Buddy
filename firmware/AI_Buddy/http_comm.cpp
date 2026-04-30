@@ -7,14 +7,15 @@
 
 #include "http_comm.h"
 #include <HTTPClient.h>
+#include <WiFiClient.h>
 #include <ArduinoJson.h>
 #include "mbedtls/base64.h"
 
-HttpComm::HttpComm() : _rxBuffer(nullptr) {
-    _serverUrl = String("http://") + WS_HOST + ":" + String(WS_PORT) + "/talk";
+HttpComm::HttpComm(String serverIp) : _rxBuffer(nullptr) {
+    _serverUrl = String("http://") + serverIp + ":" + String(WS_PORT) + "/talk";
     
-    // Allocate small dummy buffer
-    _rxBuffer = (uint8_t*)malloc(MAX_PLAY_BYTES);
+    // Allocate large playback buffer in PSRAM
+    _rxBuffer = (uint8_t*)heap_caps_malloc(MAX_PLAY_BYTES, MALLOC_CAP_SPIRAM);
 }
 
 HttpComm::~HttpComm() {
@@ -23,7 +24,8 @@ HttpComm::~HttpComm() {
 
 bool HttpComm::ping() {
     HTTPClient http;
-    String pingUrl = String("http://") + WS_HOST + ":" + String(WS_PORT) + "/ping";
+    String pingUrl = _serverUrl;
+    pingUrl.replace("/talk", "/ping");
     http.begin(pingUrl);
     http.setTimeout(3000);
     int code = http.GET();
@@ -41,6 +43,10 @@ BuddyResponse HttpComm::sendAudio(const uint8_t* data, size_t length) {
 
     Serial.printf("[HTTP] POST %d bytes to %s\n", length, _serverUrl.c_str());
 
+    // Tell HTTPClient to collect our custom headers
+    const char* headerKeys[] = {"X-Emotion", "X-Text", "X-Duration-Ms"};
+    http.collectHeaders(headerKeys, 3);
+
     int httpCode = http.POST((uint8_t*)data, length);
 
     if (httpCode != 200) {
@@ -49,41 +55,37 @@ BuddyResponse HttpComm::sendAudio(const uint8_t* data, size_t length) {
         return resp;
     }
 
-    // Parse JSON response
-    String body = http.getString();
-    http.end();
+    // Extract headers
+    resp.emotion = http.header("X-Emotion").toInt();
+    resp.text = http.header("X-Text");
+    resp.durationMs = http.header("X-Duration-Ms").toInt();
 
-    Serial.printf("[HTTP] Response: %d bytes\n", body.length());
+    // Stream binary payload directly to PSRAM rxBuffer
+    int len = http.getSize();
+    Serial.printf("[HTTP] Binary response: %d bytes\n", len);
 
-    JsonDocument doc;
-    DeserializationError err = deserializeJson(doc, body);
-    if (err) {
-        Serial.printf("[HTTP] JSON error: %s\n", err.c_str());
-        return resp;
-    }
-
-    resp.emotion = doc["emotion"] | 0;
-    resp.text = doc["text"].as<String>();
-    resp.durationMs = doc["duration_ms"] | 0;
-
-    // Decode base64 audio
-    const char* audioB64 = doc["audio_b64"];
-    if (audioB64 && _rxBuffer) {
-        size_t b64Len = strlen(audioB64);
-        size_t decodedLen = 0;
-
-        int ret = mbedtls_base64_decode(
-            _rxBuffer, MAX_PLAY_BYTES, &decodedLen,
-            (const unsigned char*)audioB64, b64Len
-        );
-
-        if (ret == 0 && decodedLen > 0) {
+    if (len > 0 && len <= MAX_PLAY_BYTES && _rxBuffer) {
+        WiFiClient* stream = http.getStreamPtr();
+        size_t bytesRead = 0;
+        
+        while (http.connected() && bytesRead < len) {
+            size_t available = stream->available();
+            if (available) {
+                // Read chunks directly into our PSRAM buffer
+                size_t chunk = stream->readBytes(_rxBuffer + bytesRead, min(available, (size_t)(len - bytesRead)));
+                bytesRead += chunk;
+            }
+            delay(1);
+        }
+        
+        if (bytesRead > 0) {
             resp.audioData = _rxBuffer;
-            resp.audioLen = decodedLen;
-            Serial.printf("[HTTP] Audio decoded: %d bytes\n", decodedLen);
+            resp.audioLen = bytesRead;
+            Serial.printf("[HTTP] Audio streamed to PSRAM: %d bytes\n", bytesRead);
         }
     }
 
+    http.end();
     resp.valid = true;
     Serial.printf("[HTTP] OK! emotion=%d, text=\"%s\"\n", resp.emotion, resp.text.substring(0, 40).c_str());
     return resp;

@@ -53,23 +53,27 @@ Think of it as your own personal **J.A.R.V.I.S.** — minus the billion-dollar s
 │                    ESP32-S3 Super Mini                       │
 │  ┌───────────┐    ┌──────────┐    ┌──────────────────────┐  │
 │  │  INMP441  │    │   WiFi   │    │  SSD1306 OLED 128×64 │  │
-│  │ Microphone│───▶│ HTTP POST│    │  Animated Face 😊😢🤔  │  │
-│  └───────────┘    └────┬─────┘    └──────────▲───────────┘  │
-│                        │                     │              │
-└────────────────────────┼─────────────────────┼──────────────┘
-                         │  Raw PCM Audio      │  JSON Response
-                         │  (16kHz, 16-bit)    │  {emotion, text}
-                         ▼                     │
+│  │ Microphone│───▶│ UDP Auto-│    │  Animated Face 😊😢🤔  │  │
+│  └───────────┘    │ Discovery│    └──────────▲───────────┘  │
+│                   └────┬─────┘               │              │
+│  ┌───────────┐         │                     │              │
+│  │ MAX98357A │         │                     │              │
+│  │I2S Speaker│◀────────┼─────────────────────┘              │
+│  └───────────┘         │                                    │
+└────────────────────────┼────────────────────────────────────┘
+                         │  Raw PCM Audio (16kHz, 16-bit)     │
+                         │  + Custom HTTP Headers             │
+                         ▼                                    │
 ┌────────────────────────────────────────────────────────────┐
 │                   Python Backend (Laptop)                   │
 │                                                            │
 │   ┌──────────────┐  ┌──────────────┐  ┌─────────────────┐ │
 │   │  Stage 1:    │  │  Stage 2:    │  │   Stage 3:      │ │
 │   │  Whisper STT │─▶│  Ollama LLM  │─▶│  pyttsx3 TTS    │ │
-│   │  (base.en)   │  │  (llama3.2)  │  │  (laptop spkr)  │ │
+│   │  (base.en)   │  │  (llama3.2)  │  │  (binary audio) │ │
 │   └──────────────┘  └──────────────┘  └─────────────────┘ │
 │                                                            │
-│   FastAPI Server on port 8765                              │
+│   FastAPI Server (UDP Broadcaster + HTTP)                  │
 └────────────────────────────────────────────────────────────┘
 ```
 
@@ -79,8 +83,8 @@ Think of it as your own personal **J.A.R.V.I.S.** — minus the billion-dollar s
 2. **ESP32 sends** audio to the laptop via HTTP POST over WiFi
 3. **Whisper** transcribes speech to text (offline, ~1 second)
 4. **Ollama** generates an intelligent response with an emotion tag
-5. **pyttsx3** synthesizes speech and plays through laptop speaker
-6. **ESP32 receives** JSON → updates the animated face on OLED
+5. **pyttsx3** synthesizes speech, bypassing the laptop speaker to generate a raw audio stream
+6. **ESP32 receives** binary audio directly to its PSRAM via HTTP stream and plays it on the **I2S Speaker**, updating the face simultaneously
 
 ---
 
@@ -92,9 +96,11 @@ Think of it as your own personal **J.A.R.V.I.S.** — minus the billion-dollar s
 |---|---|---|---|
 | 1 | ESP32-S3 Super Mini | Main controller + WiFi | ₹350 |
 | 2 | INMP441 Microphone | Digital I2S voice input | ₹150 |
-| 3 | SSD1306 OLED 0.96" (128×64) | Animated face display | ₹180 |
-| 4 | Breadboard + Jumper Wires | Prototyping | ₹100 |
-| | | **Total** | **~₹780** |
+| 3 | MAX98357A Amplifier | Digital I2S audio output | ₹120 |
+| 4 | 3W 4Ohm Mini Speaker | Audio playback | ₹50 |
+| 5 | SSD1306 OLED 0.96" (128×64) | Animated face display | ₹180 |
+| 6 | Breadboard + Jumper Wires | Prototyping | ₹100 |
+| | | **Total** | **~₹950** |
 
 ### Wiring Diagram
 
@@ -114,6 +120,15 @@ ESP32-S3 Super Mini          SSD1306 OLED Display
 GPIO 5   (SDA)   ◀───────▶  SDA  (I2C Data)
 GPIO 6   (SCL)   ────────▶  SCL  (I2C Clock)
 3V3              ────────▶  VCC
+GND              ────────▶  GND
+
+
+ESP32-S3 Super Mini          MAX98357A I2S Amplifier
+─────────────────           ───────────────────────
+GPIO 1   (BCLK)  ────────▶  BCLK
+GPIO 2   (LRC)   ────────▶  LRC
+GPIO 4   (DIN)   ────────▶  DIN
+5V / VBUS        ────────▶  VIN (Needs 5V for loud audio)
 GND              ────────▶  GND
 ```
 
@@ -308,7 +323,8 @@ AI-Buddy/
 
 ## 🛣️ Roadmap
 
-- [ ] 🔊 Hardware speaker support (MAX98357A + PSRAM board)
+- [x] 🔊 Hardware speaker support (MAX98357A + PSRAM binary streaming)
+- [x] 📡 UDP Auto-Discovery (zero-configuration network setup)
 - [ ] 🗣️ Wake word detection ("Hey Buddy")
 - [ ] 🏠 Smart home control via MQTT
 - [ ] 📷 Camera module for visual recognition

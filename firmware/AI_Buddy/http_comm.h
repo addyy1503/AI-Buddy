@@ -27,7 +27,7 @@ struct BuddyResponse {
 
 class HttpComm {
 public:
-    HttpComm();
+    HttpComm(String serverIp);
     ~HttpComm();
 
     // Send recorded audio, get back response
