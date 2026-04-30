@@ -94,13 +94,12 @@ Think of it as your own personal **J.A.R.V.I.S.** — minus the billion-dollar s
 
 | # | Component | Purpose | Approx. Cost |
 |---|---|---|---|
-| 1 | ESP32-S3 Super Mini | Main controller + WiFi | ₹350 |
-| 2 | INMP441 Microphone | Digital I2S voice input | ₹150 |
-| 3 | MAX98357A Amplifier | Digital I2S audio output | ₹120 |
+| 1 | ESP32-S3 Super Mini | Main controller + WiFi | 
+| 2 | INMP441 Microphone | Digital I2S voice input | 
+| 3 | MAX98357A Amplifier | Digital I2S audio output |
 | 4 | 3W 4Ohm Mini Speaker | Audio playback | ₹50 |
-| 5 | SSD1306 OLED 0.96" (128×64) | Animated face display | ₹180 |
-| 6 | Breadboard + Jumper Wires | Prototyping | ₹100 |
-| | | **Total** | **~₹950** |
+| 5 | SSD1306 OLED 0.96" (128×64) | Animated face display | 
+| 6 | Breadboard + Jumper Wires | Prototyping |
 
 ### Wiring Diagram
 
