@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+venv/
+.env
+*.wav
+*.mp3
+
+# Arduino
+firmware/**/build/
+firmware/**/.build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Project specific
+backend/debug_audio.wav
+backend/temp_tts.wav
+backend/memory.json
+implementation_plan.md
